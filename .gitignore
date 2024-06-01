@@ -1,0 +1,44 @@
+# Python compiled files
+*.pyc
+*.pyo
+__pycache__/
+
+# Virtual environment
+venv/
+env/
+.env
+
+# Configuration files
+config.json
+ecobee_token.json
+
+# Log files
+*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS files
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Data files
+*.csv
+*.txt
+*.xlsx
+*.xls
+*.db
+*.sqlite
+
+# Application-specific files
+# Add any additional files specific to your application
