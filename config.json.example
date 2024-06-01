@@ -1,0 +1,49 @@
+{
+    "api_key": "",
+    "datadog_api_key": "",
+    "datadog_app_key": "",
+    "thermostats": [
+        {
+            "id": "",
+            "write_options": {
+                "write_heat_pump_1": true,
+                "write_heat_pump_2": false,
+                "write_aux_heat_1": true,
+                "write_aux_heat_2": false,
+                "write_cool_1": true,
+                "write_cool_2": false,
+                "write_humidifier": false,
+                "write_dehumidifier": true
+            },
+            "always_write_weather_as_current": false
+        },
+        {
+            "id": "",
+            "write_options": {
+                "write_heat_pump_1": false,
+                "write_heat_pump_2": false,
+                "write_aux_heat_1": true,
+                "write_aux_heat_2": false,
+                "write_cool_1": true,
+                "write_cool_2": false,
+                "write_humidifier": true,
+                "write_dehumidifier": false
+            },
+            "always_write_weather_as_current": false
+        },
+        {
+            "id": "",
+            "write_options": {
+                "write_heat_pump_1": false,
+                "write_heat_pump_2": false,
+                "write_aux_heat_1": true,
+                "write_aux_heat_2": false,
+                "write_cool_1": true,
+                "write_cool_2": false,
+                "write_humidifier": true,
+                "write_dehumidifier": false
+            },
+            "always_write_weather_as_current": false
+        }
+    ]
+}
