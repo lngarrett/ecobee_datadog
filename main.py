@@ -221,19 +221,22 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
     # Send sensor data
     sensor_time = datetime.strptime(thermostat_data['utcTime'], '%Y-%m-%d %H:%M:%S')
     for sensor in thermostat_data['remoteSensors']:
-        sensor_name = sensor['name']
-        for capability in sensor['capability']:
-            if capability['type'] == 'temperature':
-                temp_f = int(capability['value']) / 10.0
-                temp_c = (temp_f - 32) * 5 / 9
-                logging.debug(f"Sending ecobee.sensor.temperature_c with value {temp_c} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.temperature_c', [(sensor_time.timestamp(), temp_c)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
-                logging.debug(f"Sending ecobee.sensor.temperature_f with value {temp_f} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.temperature_f', [(sensor_time.timestamp(), temp_f)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
-            elif capability['type'] == 'occupancy':
-                occupied = capability['value'] == 'true'
-                logging.debug(f"Sending ecobee.sensor.occupied with value {occupied} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.occupied', [(sensor_time.timestamp(), occupied)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+        try:
+            sensor_name = sensor['name']
+            for capability in sensor['capability']:
+                if capability['type'] == 'temperature':
+                    temp_f = int(capability['value']) / 10.0
+                    temp_c = (temp_f - 32) * 5 / 9
+                    logging.debug(f"Sending ecobee.sensor.temperature_c with value {temp_c} for sensor {sensor_name} at {sensor_time}")
+                    send_metric('ecobee.sensor.temperature_c', [(sensor_time.timestamp(), temp_c)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+                    logging.debug(f"Sending ecobee.sensor.temperature_f with value {temp_f} for sensor {sensor_name} at {sensor_time}")
+                    send_metric('ecobee.sensor.temperature_f', [(sensor_time.timestamp(), temp_f)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+                elif capability['type'] == 'occupancy':
+                    occupied = capability['value'] == 'true'
+                    logging.debug(f"Sending ecobee.sensor.occupied with value {occupied} for sensor {sensor_name} at {sensor_time}")
+                    send_metric('ecobee.sensor.occupied', [(sensor_time.timestamp(), occupied)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+        except Exception as e:
+            logging.error(f"An unexpected error occurred while processing sensor {sensor_name} on thermostat {thermostat_name}: {e}")
 
     # Send weather data
     weather_data = thermostat_data['weather']
