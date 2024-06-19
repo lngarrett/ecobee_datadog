@@ -34,7 +34,6 @@ ecobee_token.json
 
 # Data files
 *.csv
-*.txt
 *.xlsx
 *.xls
 *.db
