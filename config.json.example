@@ -2,6 +2,9 @@
     "api_key": "",
     "datadog_api_key": "",
     "datadog_app_key": "",
+    "openweathermap_api_key": "",
+    "latitude": 38.00,
+    "longitude": -85.00,
     "thermostats": [
         {
             "id": "",
