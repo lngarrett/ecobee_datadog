@@ -331,23 +331,16 @@ def main():
     while True:
         for thermostat_config in config.thermostats:
             thermostat_id = thermostat_config['id']
-            try:
-                thermostat_data = client.get_thermostat_data(thermostat_id)
-                logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
+            thermostat_data = client.get_thermostat_data(thermostat_id)
+            logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
 
             last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
-            last_written_weather = last_written_weathers.get(thermostat_id, None)
 
-            last_written_runtime_interval, last_written_weather = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, last_written_weather)
+            last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
             logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
-
             last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
-            last_written_weathers[thermostat_id] = last_written_weather
-
-            except requests.exceptions.HTTPError as e:
-                logging.error(f"HTTP error occurred while fetching data for thermostat {thermostat_id}: {e}")
-            except Exception as e:
-                logging.error(f"An unexpected error occurred while processing thermostat {thermostat_id}: {e}")
+        send_weather_to_datadog(config, ddog_client)
+        logging.debug(f"Weather data sent to Datadog.")
 
         logging.debug("Waiting for 5 minutes before the next update.")
         time.sleep(300)  # Wait for 5 minutes before next update
