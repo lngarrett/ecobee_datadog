@@ -329,16 +329,16 @@ def main():
     last_written_runtime_intervals = {}
 
     while True:
-        # for thermostat_config in config.thermostats:
-        #     thermostat_id = thermostat_config['id']
-        #     thermostat_data = client.get_thermostat_data(thermostat_id)
-        #     logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
+        for thermostat_config in config.thermostats:
+            thermostat_id = thermostat_config['id']
+            thermostat_data = client.get_thermostat_data(thermostat_id)
+            logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
 
-        #     last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
+            last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
 
-        #     last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
-        #     logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
-        #     last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
+            last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
+            logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
+            last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
         send_weather_to_datadog(config, ddog_client)
         logging.debug(f"Weather data sent to Datadog.")
 
