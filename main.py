@@ -1,10 +1,19 @@
 import json
 import os
 import time
-from datadog import initialize, api
+
 import requests
 from datetime import datetime, timezone, timedelta
 import logging
+
+
+from datadog_api_client import ApiClient, Configuration
+from datadog_api_client.v2.api.metrics_api import MetricsApi
+from datadog_api_client.v2.model.metric_intake_type import MetricIntakeType
+from datadog_api_client.v2.model.metric_payload import MetricPayload
+from datadog_api_client.v2.model.metric_point import MetricPoint
+from datadog_api_client.v2.model.metric_series import MetricSeries
+
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,6 +27,9 @@ class Config:
             self.work_dir = config_data.get('work_dir', os.getcwd())
             self.datadog_api_key = config_data['datadog_api_key']
             self.datadog_app_key = config_data['datadog_app_key']
+            self.openweathermap_api_key = config_data['openweathermap_api_key']
+            self.latitude = config_data['latitude']
+            self.longitude = config_data['longitude']
             self.thermostats = []
             for thermostat_config in config_data['thermostats']:
                 thermostat_config['datadog_api_key'] = self.datadog_api_key
@@ -108,16 +120,55 @@ class EcobeeClient:
         return data['thermostatList'][0]
 
 # Function to send data to Datadog
-def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, last_written_weather):
-    initialize(api_key=thermostat_config['datadog_api_key'], app_key=thermostat_config['datadog_app_key'])
+
+class DatadogClient:
+    def __init__(self, api_key, app_key):
+        self.configuration = Configuration()
+        self.configuration.api_key["apiKeyAuth"] = api_key
+        self.configuration.api_key["appKeyAuth"] = app_key
+        print('lol')
+
+    def send_metric(self, metric, points, tags, metric_type='gauge'):
+        metric_type_map = {
+            'gauge': MetricIntakeType.GAUGE,
+            'count': MetricIntakeType.COUNT,
+            'rate': MetricIntakeType.RATE,
+        }
+
+        if metric_type not in metric_type_map:
+            raise ValueError(f"Unsupported metric type: {metric_type}")
+
+        metric_points = []
+        for point in points:
+            timestamp = int(point[0])
+            value = point[1]
+            
+            # Convert boolean values to numeric values
+            if isinstance(value, bool):
+                value = 1 if value else 0
+            
+            metric_points.append(MetricPoint(timestamp=timestamp, value=value))
+
+        metric_series = MetricSeries(
+            metric=metric,
+            type=metric_type_map[metric_type],
+            points=metric_points,
+            tags=tags,
+        )
+
+        body = MetricPayload(series=[metric_series])
+
+        with ApiClient(self.configuration) as api_client:
+            api_instance = MetricsApi(api_client)
+            response = api_instance.submit_metrics(body=body)
+
+            return response
+
+def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, datadog_client):
     logging.debug("Datadog initialized with the provided API key and app key.")
 
     thermostat_name = thermostat_data['name']
     tags = [f"thermostat_name:{thermostat_name}"]
-
-    def send_metric(metric, points, tags):
-        logging.debug(f"Sending metric {metric} with points {points} and tags {tags}")
-        api.Metric.send(metric=metric, points=points, tags=tags)
 
     def send_temperature_metrics(report_time, temperature_f, heat_set_point_f, cool_set_point_f, demand_mgmt_offset_f, humidity, fan_run_time, suffix=""):
         temperature_c = (temperature_f - 32) * 5 / 9
@@ -139,34 +190,34 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
         logging.debug(f"Sending temperature metrics with suffix {suffix} at {report_time}")
         for point in points:
             logging.debug(f"Point: {point}")
-        send_metric(f'ecobee.runtime.temperature_f{suffix}', [(report_time.timestamp(), temperature_f)], tags)
-        send_metric(f'ecobee.runtime.temperature_c{suffix}', [(report_time.timestamp(), temperature_c)], tags)
-        send_metric(f'ecobee.runtime.heat_set_point_f{suffix}', [(report_time.timestamp(), heat_set_point_f)], tags)
-        send_metric(f'ecobee.runtime.heat_set_point_c{suffix}', [(report_time.timestamp(), heat_set_point_c)], tags)
-        send_metric(f'ecobee.runtime.cool_set_point_f{suffix}', [(report_time.timestamp(), cool_set_point_f)], tags)
-        send_metric(f'ecobee.runtime.cool_set_point_c{suffix}', [(report_time.timestamp(), cool_set_point_c)], tags)
-        send_metric(f'ecobee.runtime.demand_mgmt_offset_f{suffix}', [(report_time.timestamp(), demand_mgmt_offset_f)], tags)
-        send_metric(f'ecobee.runtime.demand_mgmt_offset_c{suffix}', [(report_time.timestamp(), demand_mgmt_offset_c)], tags)
-        send_metric(f'ecobee.runtime.humidity{suffix}', [(report_time.timestamp(), humidity)], tags)
-        send_metric(f'ecobee.runtime.fan_run_time{suffix}', [(report_time.timestamp(), fan_run_time)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.temperature_f{suffix}', [(report_time.timestamp(), temperature_f)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.temperature_c{suffix}', [(report_time.timestamp(), temperature_c)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.heat_set_point_f{suffix}', [(report_time.timestamp(), heat_set_point_f)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.heat_set_point_c{suffix}', [(report_time.timestamp(), heat_set_point_c)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.cool_set_point_f{suffix}', [(report_time.timestamp(), cool_set_point_f)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.cool_set_point_c{suffix}', [(report_time.timestamp(), cool_set_point_c)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.demand_mgmt_offset_f{suffix}', [(report_time.timestamp(), demand_mgmt_offset_f)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.demand_mgmt_offset_c{suffix}', [(report_time.timestamp(), demand_mgmt_offset_c)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.humidity{suffix}', [(report_time.timestamp(), humidity)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.fan_run_time{suffix}', [(report_time.timestamp(), fan_run_time)], tags)
 
     def send_optional_metrics(report_time, extended_runtime, i, thermostat_config):
         write_options = thermostat_config['write_options']
         if write_options.get('write_humidifier', False):
             desired_humidity = extended_runtime['desiredHumidity'][i]
             logging.debug(f"Sending ecobee.runtime.humidity_set_point with value {desired_humidity} at {report_time}")
-            send_metric('ecobee.runtime.humidity_set_point', [(report_time.timestamp(), desired_humidity)], tags)
+            datadog_client.send_metric('ecobee.runtime.humidity_set_point', [(report_time.timestamp(), desired_humidity)], tags)
             humidifier_run_time = extended_runtime['humidifier'][i]
             logging.debug(f"Sending ecobee.runtime.humidifier_run_time with value {humidifier_run_time} at {report_time}")
-            send_metric('ecobee.runtime.humidifier_run_time', [(report_time.timestamp(), humidifier_run_time)], tags)
+            datadog_client.send_metric('ecobee.runtime.humidifier_run_time', [(report_time.timestamp(), humidifier_run_time)], tags)
         
         if write_options.get('write_dehumidifier', False):
             desired_dehumidity = extended_runtime['desiredDehumidity'][i]
             logging.debug(f"Sending ecobee.runtime.dehumidity_set_point with value {desired_dehumidity} at {report_time}")
-            send_metric('ecobee.runtime.dehumidity_set_point', [(report_time.timestamp(), desired_dehumidity)], tags)
+            datadog_client.send_metric('ecobee.runtime.dehumidity_set_point', [(report_time.timestamp(), desired_dehumidity)], tags)
             dehumidifier_run_time = extended_runtime['dehumidifier'][i]
             logging.debug(f"Sending ecobee.runtime.dehumidifier_run_time with value {dehumidifier_run_time} at {report_time}")
-            send_metric('ecobee.runtime.dehumidifier_run_time', [(report_time.timestamp(), dehumidifier_run_time)], tags)
+            datadog_client.send_metric('ecobee.runtime.dehumidifier_run_time', [(report_time.timestamp(), dehumidifier_run_time)], tags)
 
         optional_metrics = {
             'aux_heat_1_run_time': extended_runtime['auxHeat1'][i],
@@ -181,7 +232,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
             metric_name = metric.replace("_run_time", "")
             if write_options.get(f'write_{metric_name}', False):
                 logging.debug(f"Sending {metric} with value {value} at {report_time}")
-                send_metric(f'ecobee.runtime.{metric}', [(report_time.timestamp(), value)], tags)
+                datadog_client.send_metric(f'ecobee.runtime.{metric}', [(report_time.timestamp(), value)], tags)
 
     # Send air quality data
     runtime = thermostat_data['runtime']
@@ -196,7 +247,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
 
     for metric, value in air_quality_metrics.items():
         logging.debug(f"Sending air quality metric {metric} with value {value} at {current_runtime_report_time}")
-        send_metric(metric, [(current_runtime_report_time.timestamp(), value)], tags)
+        datadog_client.send_metric(metric, [(current_runtime_report_time.timestamp(), value)], tags)
 
     # Send thermostat runtime data
     extended_runtime = thermostat_data['extendedRuntime']
@@ -227,52 +278,44 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
                 temp_f = int(capability['value']) / 10.0
                 temp_c = (temp_f - 32) * 5 / 9
                 logging.debug(f"Sending ecobee.sensor.temperature_c with value {temp_c} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.temperature_c', [(sensor_time.timestamp(), temp_c)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+                datadog_client.send_metric('ecobee.sensor.temperature_c', [(sensor_time.timestamp(), temp_c)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
                 logging.debug(f"Sending ecobee.sensor.temperature_f with value {temp_f} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.temperature_f', [(sensor_time.timestamp(), temp_f)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+                datadog_client.send_metric('ecobee.sensor.temperature_f', [(sensor_time.timestamp(), temp_f)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
             elif capability['type'] == 'occupancy':
                 occupied = capability['value'] == 'true'
                 logging.debug(f"Sending ecobee.sensor.occupied with value {occupied} for sensor {sensor_name} at {sensor_time}")
-                send_metric('ecobee.sensor.occupied', [(sensor_time.timestamp(), occupied)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
+                datadog_client.send_metric('ecobee.sensor.occupied', [(sensor_time.timestamp(), occupied)], [f"thermostat_name:{thermostat_name}", f"sensor_name:{sensor_name}"])
 
-    # Send weather data
-    weather_data = thermostat_data['weather']
-    weather_time = datetime.strptime(weather_data['timestamp'], '%Y-%m-%d %H:%M:%S')
-    outdoor_temp_f = weather_data['forecasts'][0]['temperature'] / 10.0
-    outdoor_temp_c = (outdoor_temp_f - 32) * 5 / 9
-    dewpoint_f = weather_data['forecasts'][0]['dewpoint'] / 10.0
-    dewpoint_c = (dewpoint_f - 32) * 5 / 9
+    return last_written_runtime_interval
 
-    pressure_mb = weather_data['forecasts'][0]['pressure']
-    outdoor_humidity = weather_data['forecasts'][0]['relativeHumidity']
-    wind_speed_mph = weather_data['forecasts'][0]['windSpeed']
-    wind_bearing = weather_data['forecasts'][0]['windBearing']
-    visibility_meters = weather_data['forecasts'][0]['visibility']
-    visibility_miles = visibility_meters * 0.000621371
+def send_weather_to_datadog(config, client: DatadogClient, tags= []):
+    units = 'imperial'  # Use 'imperial' for Fahrenheit
+    url = f"https://api.openweathermap.org/data/3.0/onecall?lat={config.latitude}&lon={config.longitude}&appid={config.openweathermap_api_key}&units={units}"
+    print(url)
+    response = requests.get(url)
+    response.raise_for_status()
+    weather_data = response.json()
+    current_data = weather_data['current']
+    weather_time = datetime.fromtimestamp(current_data['dt'])
     weather_metrics = {
-        'ecobee.weather.outdoor_temp_f': outdoor_temp_f,
-        'ecobee.weather.outdoor_temp_c': outdoor_temp_c,
-        'ecobee.weather.outdoor_humidity': outdoor_humidity,
-        'ecobee.weather.barometric_pressure_mb': pressure_mb,
-        'ecobee.weather.barometric_pressure_inHg': pressure_mb * 0.0295299830714,
-        'ecobee.weather.dew_point_f': dewpoint_f,
-        'ecobee.weather.dew_point_c': dewpoint_c,
-        'ecobee.weather.wind_speed_mph': wind_speed_mph,
-        'ecobee.weather.wind_bearing': wind_bearing,
-        'ecobee.weather.visibility_mi': visibility_miles,
-        'ecobee.weather.visibility_km': visibility_meters / 1000.0
+        'weather.temp': current_data['temp'],
+        'weather.feels_like': current_data['feels_like'],
+        'weather.pressure': current_data['pressure'],
+        'weather.humidity': current_data['humidity'],
+        'weather.dew_point': current_data['dew_point'],
+        'weather.uvi': current_data['uvi'],
+        'weather.clouds': current_data['clouds'],
+        'weather.visibility': current_data['visibility'],
+        'weather.wind_speed': current_data['wind_speed'],
+        'weather.wind_deg': current_data['wind_deg'],
+        'weather.wind_gust': current_data.get('wind_gust', 0),
+        'weather.moon_phase': weather_data['daily'][0]['moon_phase']
     }
+    for metric, value in weather_metrics.items():
+        client.send_metric(metric, [(weather_time.timestamp(), value)], tags)
 
-    always_write_weather_as_current = thermostat_config.get('always_write_weather_as_current', False)
-    if weather_time != last_written_weather or always_write_weather_as_current:
-        point_time = weather_time if not always_write_weather_as_current else datetime.now()
-        for metric, value in weather_metrics.items():
-            logging.debug(f"Sending weather metric {metric} with value {value} at {point_time}")
-            send_metric(metric, [(point_time.timestamp(), value)], [f"thermostat_name:{thermostat_name}", "data_source:ecobee"])
-
-        last_written_weather = weather_time
-
-    return last_written_runtime_interval, last_written_weather
+    daily_rain_volume = weather_data['daily'][0].get('rain', 0)
+    client.send_metric('weather.daily_rain_volume', [(weather_time.timestamp(), daily_rain_volume)], tags, metric_type='count')
 
 def main():
     config_file = 'config.json'
@@ -281,24 +324,23 @@ def main():
 
     token_file = os.path.join(config.work_dir, 'ecobee_token.json')
     client = EcobeeClient(config.api_key, token_file)
+    ddog_client = DatadogClient(api_key=config.datadog_api_key, app_key=config.datadog_app_key)
 
     last_written_runtime_intervals = {}
-    last_written_weathers = {}
 
     while True:
-        for thermostat_config in config.thermostats:
-            thermostat_id = thermostat_config['id']
-            thermostat_data = client.get_thermostat_data(thermostat_id)
-            logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
+        # for thermostat_config in config.thermostats:
+        #     thermostat_id = thermostat_config['id']
+        #     thermostat_data = client.get_thermostat_data(thermostat_id)
+        #     logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
 
-            last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
-            last_written_weather = last_written_weathers.get(thermostat_id, None)
+        #     last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
 
-            last_written_runtime_interval, last_written_weather = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, last_written_weather)
-            logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
-
-            last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
-            last_written_weathers[thermostat_id] = last_written_weather
+        #     last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
+        #     logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
+        #     last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
+        send_weather_to_datadog(config, ddog_client)
+        logging.debug(f"Weather data sent to Datadog.")
 
         logging.debug("Waiting for 5 minutes before the next update.")
         time.sleep(300)  # Wait for 5 minutes before next update
