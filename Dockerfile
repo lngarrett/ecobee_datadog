@@ -11,7 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the entire application code into the container
-COPY . .
+COPY ./ /app/.
 
 # Set the entry point command to run the main Python script
 CMD ["python", "main.py", "--config", "config.json"]
