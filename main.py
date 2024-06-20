@@ -2,10 +2,9 @@ import json
 import os
 import time
 
-import requests
 from datetime import datetime, timezone, timedelta
 import logging
-
+from functools import wraps
 
 from datadog_api_client import ApiClient, Configuration
 from datadog_api_client.v2.api.metrics_api import MetricsApi
@@ -13,6 +12,25 @@ from datadog_api_client.v2.model.metric_intake_type import MetricIntakeType
 from datadog_api_client.v2.model.metric_payload import MetricPayload
 from datadog_api_client.v2.model.metric_point import MetricPoint
 from datadog_api_client.v2.model.metric_series import MetricSeries
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+def create_retry_session(total_retries=7, backoff_factor=1):
+    session = requests.Session()
+    retries = Retry(
+        total=total_retries,  # Total number of retry attempts
+        backoff_factor=backoff_factor,  # Factor to calculate delay between retries
+        status_forcelist=[i for i in range(400, 600)],  # Retry on 4xx and 5xx status codes
+        raise_on_status=False  # Do not raise an exception on non-200 responses
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+session_with_retries = create_retry_session()
 
 
 # Configure logging
@@ -38,9 +56,10 @@ class Config:
 
 # Ecobee API client class
 class EcobeeClient:
-    def __init__(self, api_key, token_file):
+    def __init__(self, api_key, token_file, session):
         self.api_key = api_key
         self.token_file = token_file
+        self.session = session
         self.token = self.load_token()
         logging.debug(f"Loaded token from file: {self.token}")
 
@@ -68,7 +87,7 @@ class EcobeeClient:
             'client_id': self.api_key,
             'scope': 'smartRead'
         }
-        response = requests.get(authorize_url, params=params)
+        response = self.session.get(authorize_url, params=params)
         response.raise_for_status()
         auth_data = response.json()
         ecobee_pin = auth_data['ecobeePin']
@@ -83,7 +102,7 @@ class EcobeeClient:
             'code': code,
             'client_id': self.api_key
         }
-        response = requests.post(token_url, data=data)
+        response = self.session.post(token_url, data=data)
         response.raise_for_status()
         token_data = response.json()
         token_data['expiry'] = str(time.time() + token_data['expires_in'])
@@ -96,7 +115,7 @@ class EcobeeClient:
             'refresh_token': self.token['refresh_token'],
             'client_id': self.api_key
         }
-        response = requests.post(url, data=data)
+        response = self.session.post(url, data=data)
         response.raise_for_status()
         self.token = response.json()
         self.token['expiry'] = str(time.time() + self.token['expires_in'])
@@ -113,7 +132,7 @@ class EcobeeClient:
             'Content-Type': 'application/json;charset=UTF-8',
             'Authorization': f'Bearer {self.token["access_token"]}'
         }
-        response = requests.get(url, headers=headers)
+        response = self.session.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
         logging.debug(f"Thermostat data retrieved: {data}")
@@ -126,7 +145,6 @@ class DatadogClient:
         self.configuration = Configuration()
         self.configuration.api_key["apiKeyAuth"] = api_key
         self.configuration.api_key["appKeyAuth"] = app_key
-        print('lol')
 
     def send_metric(self, metric, points, tags, metric_type='gauge'):
         metric_type_map = {
@@ -288,11 +306,10 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
 
     return last_written_runtime_interval
 
-def send_weather_to_datadog(config, client: DatadogClient, tags= []):
+def send_weather_to_datadog(config, client: DatadogClient, session, tags= []):
     units = 'imperial'  # Use 'imperial' for Fahrenheit
     url = f"https://api.openweathermap.org/data/3.0/onecall?lat={config.latitude}&lon={config.longitude}&appid={config.openweathermap_api_key}&units={units}"
-    print(url)
-    response = requests.get(url)
+    response = session.get(url)
     response.raise_for_status()
     weather_data = response.json()
     current_data = weather_data['current']
@@ -323,27 +340,38 @@ def main():
     logging.debug(f"Loaded configuration from file: {config_file}")
 
     token_file = os.path.join(config.work_dir, 'ecobee_token.json')
-    client = EcobeeClient(config.api_key, token_file)
+    session_with_retries = create_retry_session()  # Create a session with retries
+    client = EcobeeClient(config.api_key, token_file, session_with_retries)
     ddog_client = DatadogClient(api_key=config.datadog_api_key, app_key=config.datadog_app_key)
 
     last_written_runtime_intervals = {}
 
     while True:
-        for thermostat_config in config.thermostats:
-            thermostat_id = thermostat_config['id']
-            thermostat_data = client.get_thermostat_data(thermostat_id)
-            logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
+        try:
+            for thermostat_config in config.thermostats:
+                try:
+                    thermostat_id = thermostat_config['id']
+                    thermostat_data = client.get_thermostat_data(thermostat_id)
+                    logging.debug(f"Retrieved thermostat data for {thermostat_id}: {thermostat_data}")
 
-            last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
+                    last_written_runtime_interval = last_written_runtime_intervals.get(thermostat_id, 0)
 
-            last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
-            logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
-            last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
-        send_weather_to_datadog(config, ddog_client)
-        logging.debug(f"Weather data sent to Datadog.")
+                    last_written_runtime_interval = send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, ddog_client)
+                    logging.debug(f"Data sent to Datadog for thermostat {thermostat_id}.")
+                    last_written_runtime_intervals[thermostat_id] = last_written_runtime_interval
+                except Exception as e:
+                    logging.error(f"Error processing thermostat {thermostat_id}: {e}")
 
-        logging.debug("Waiting for 5 minutes before the next update.")
-        time.sleep(300)  # Wait for 5 minutes before next update
+            try:
+                send_weather_to_datadog(config, ddog_client, session_with_retries)
+                logging.debug(f"Weather data sent to Datadog.")
+            except Exception as e:
+                logging.error(f"Error sending weather data to Datadog: {e}")
+
+            logging.debug("Waiting for 5 minutes before the next update.")
+            time.sleep(300)  # Wait for 5 minutes before next update
+        except Exception as e:
+            logging.error(f"Unexpected error in main loop: {e}")
 
 if __name__ == '__main__':
     main()
