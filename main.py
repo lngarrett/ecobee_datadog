@@ -182,7 +182,7 @@ class DatadogClient:
 
             return response
 
-def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, datadog_client):
+def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_interval, datadog_client: DatadogClient):
     logging.debug("Datadog initialized with the provided API key and app key.")
 
     thermostat_name = thermostat_data['name']
@@ -217,7 +217,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
         datadog_client.send_metric(f'ecobee.runtime.demand_mgmt_offset_f{suffix}', [(report_time.timestamp(), demand_mgmt_offset_f)], tags)
         datadog_client.send_metric(f'ecobee.runtime.demand_mgmt_offset_c{suffix}', [(report_time.timestamp(), demand_mgmt_offset_c)], tags)
         datadog_client.send_metric(f'ecobee.runtime.humidity{suffix}', [(report_time.timestamp(), humidity)], tags)
-        datadog_client.send_metric(f'ecobee.runtime.fan_run_time{suffix}', [(report_time.timestamp(), fan_run_time)], tags)
+        datadog_client.send_metric(f'ecobee.runtime.fan_run_time{suffix}', [(report_time.timestamp(), fan_run_time)], tags, metric_type='count')
 
     def send_optional_metrics(report_time, extended_runtime, i, thermostat_config):
         write_options = thermostat_config['write_options']
@@ -227,7 +227,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
             datadog_client.send_metric('ecobee.runtime.humidity_set_point', [(report_time.timestamp(), desired_humidity)], tags)
             humidifier_run_time = extended_runtime['humidifier'][i]
             logging.debug(f"Sending ecobee.runtime.humidifier_run_time with value {humidifier_run_time} at {report_time}")
-            datadog_client.send_metric('ecobee.runtime.humidifier_run_time', [(report_time.timestamp(), humidifier_run_time)], tags)
+            datadog_client.send_metric('ecobee.runtime.humidifier_run_time', [(report_time.timestamp(), humidifier_run_time)], tags, metric_type='count')
         
         if write_options.get('write_dehumidifier', False):
             desired_dehumidity = extended_runtime['desiredDehumidity'][i]
@@ -235,7 +235,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
             datadog_client.send_metric('ecobee.runtime.dehumidity_set_point', [(report_time.timestamp(), desired_dehumidity)], tags)
             dehumidifier_run_time = extended_runtime['dehumidifier'][i]
             logging.debug(f"Sending ecobee.runtime.dehumidifier_run_time with value {dehumidifier_run_time} at {report_time}")
-            datadog_client.send_metric('ecobee.runtime.dehumidifier_run_time', [(report_time.timestamp(), dehumidifier_run_time)], tags)
+            datadog_client.send_metric('ecobee.runtime.dehumidifier_run_time', [(report_time.timestamp(), dehumidifier_run_time)], tags, metric_type='count')
 
         optional_metrics = {
             'aux_heat_1_run_time': extended_runtime['auxHeat1'][i],
@@ -250,7 +250,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
             metric_name = metric.replace("_run_time", "")
             if write_options.get(f'write_{metric_name}', False):
                 logging.debug(f"Sending {metric} with value {value} at {report_time}")
-                datadog_client.send_metric(f'ecobee.runtime.{metric}', [(report_time.timestamp(), value)], tags)
+                datadog_client.send_metric(f'ecobee.runtime.{metric}', [(report_time.timestamp(), value)], tags, metric_type='count')
 
     # Send air quality data
     runtime = thermostat_data['runtime']
