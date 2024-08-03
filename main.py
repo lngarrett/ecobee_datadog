@@ -306,13 +306,20 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
 
     return last_written_runtime_interval
 
-def send_weather_to_datadog(config, client: DatadogClient, session, tags= []):
+def send_weather_to_datadog(config, client: DatadogClient, session, tags=None):
+    if tags is None:
+        tags = []
+    
     units = 'imperial'  # Use 'imperial' for Fahrenheit
-    url = f"https://api.openweathermap.org/data/3.0/onecall?lat={config.latitude}&lon={config.longitude}&appid={config.openweathermap_api_key}&units={units}"
-    response = session.get(url)
-    response.raise_for_status()
-    weather_data = response.json()
-    current_data = weather_data['current']
+    
+    # First API call for current weather
+    current_weather_url = f"https://api.openweathermap.org/data/3.0/onecall?lat={config.latitude}&lon={config.longitude}&appid={config.openweathermap_api_key}&units={units}"
+    current_weather_response = session.get(current_weather_url)
+    current_weather_response.raise_for_status()
+    current_weather_data = current_weather_response.json()
+    
+    # Process current weather data
+    current_data = current_weather_data['current']
     weather_time = datetime.fromtimestamp(current_data['dt'])
     weather_metrics = {
         'weather.temp': current_data['temp'],
@@ -326,13 +333,24 @@ def send_weather_to_datadog(config, client: DatadogClient, session, tags= []):
         'weather.wind_speed': current_data['wind_speed'],
         'weather.wind_deg': current_data['wind_deg'],
         'weather.wind_gust': current_data.get('wind_gust', 0),
-        'weather.moon_phase': weather_data['daily'][0]['moon_phase']
+        'weather.moon_phase': current_weather_data['daily'][0]['moon_phase']
     }
+    
+    # Send current weather metrics
     for metric, value in weather_metrics.items():
         client.send_metric(metric, [(weather_time.timestamp(), value)], tags)
-
-    daily_rain_volume = weather_data['daily'][0].get('rain', 0)
-    client.send_metric('weather.daily_rain_volume', [(weather_time.timestamp(), daily_rain_volume)], tags, metric_type='count')
+    
+    # Second API call for daily summary
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    daily_summary_url = f"https://api.openweathermap.org/data/3.0/onecall/day_summary?lat={config.latitude}&lon={config.longitude}&date={current_date}&appid={config.openweathermap_api_key}&units={units}"
+    
+    daily_summary_response = session.get(daily_summary_url)
+    daily_summary_response.raise_for_status()
+    daily_summary_data = daily_summary_response.json()
+    
+    # Process and send daily precipitation data
+    daily_precipitation_volume = daily_summary_data['precipitation']['total']
+    client.send_metric('weather.precipitation_volume', [(weather_time.timestamp(), daily_precipitation_volume)], tags, metric_type='count')
 
 def main():
     config_file = 'config.json'
