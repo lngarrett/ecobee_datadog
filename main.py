@@ -306,7 +306,7 @@ def send_to_datadog(thermostat_data, thermostat_config, last_written_runtime_int
 
     return last_written_runtime_interval
 
-def send_weather_to_datadog(config, client: DatadogClient, session, tags=None):
+def send_weather_to_datadog(config, client: DatadogClient, session, last_observed_precipitation_total, tags=None):
     if tags is None:
         tags = []
     
@@ -350,7 +350,16 @@ def send_weather_to_datadog(config, client: DatadogClient, session, tags=None):
     
     # Process and send daily precipitation data
     daily_precipitation_volume = daily_summary_data['precipitation']['total']
-    client.send_metric('weather.precipitation_volume', [(weather_time.timestamp(), daily_precipitation_volume)], tags, metric_type='count')
+    delta_precipitation_volume = daily_precipitation_volume - last_observed_precipitation_total
+    
+    # Check if the delta is < 0 - usually indicates start of new day.
+    if delta_precipitation_volume < 0:
+        delta_precipitation_volume = daily_precipitation_volume
+
+    if delta_precipitation_volume > 0:
+        client.send_metric('weather.precipitation_volume', [(weather_time.timestamp(), delta_precipitation_volume)], tags, metric_type='count')
+        
+    return daily_precipitation_volume
 
 def main():
     config_file = 'config.json'
@@ -363,6 +372,7 @@ def main():
     ddog_client = DatadogClient(api_key=config.datadog_api_key, app_key=config.datadog_app_key)
 
     last_written_runtime_intervals = {}
+    last_observed_precipitation_total = 0
 
     while True:
         try:
@@ -381,7 +391,7 @@ def main():
                     logging.error(f"Error processing thermostat {thermostat_id}: {e}")
 
             try:
-                send_weather_to_datadog(config, ddog_client, session_with_retries)
+                last_observed_precipitation_total = send_weather_to_datadog(config, ddog_client, session_with_retries, last_observed_precipitation_total)
                 logging.debug(f"Weather data sent to Datadog.")
             except Exception as e:
                 logging.error(f"Error sending weather data to Datadog: {e}")
