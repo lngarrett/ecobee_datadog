@@ -9,8 +9,8 @@ env/
 .env
 
 # Configuration files
-config.json
-ecobee_token.json
+config/config.json
+config/ecobee_token.json
 
 # Log files
 *.log
