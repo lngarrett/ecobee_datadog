@@ -362,11 +362,11 @@ def send_weather_to_datadog(config, client: DatadogClient, session, last_observe
     return daily_precipitation_volume
 
 def main():
-    config_file = 'config.json'
+    config_file = 'config/config.json'
     config = Config(config_file)
     logging.debug(f"Loaded configuration from file: {config_file}")
 
-    token_file = os.path.join(config.work_dir, 'ecobee_token.json')
+    token_file = os.path.join(config.work_dir, 'config/ecobee_token.json')
     session_with_retries = create_retry_session()  # Create a session with retries
     client = EcobeeClient(config.api_key, token_file, session_with_retries)
     ddog_client = DatadogClient(api_key=config.datadog_api_key, app_key=config.datadog_app_key)
